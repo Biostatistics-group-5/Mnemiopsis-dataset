@@ -1,0 +1,177 @@
+---
+title: "Biostat_Final_Project"
+author: "Enmily Hernandez and Ga-Yeon Son"
+format: pdf
+editor: visual
+---
+
+## Final Project:
+
+#### Introduction:
+
+Mnemiopsis Leidyi is the warty comb jelly or sea walnut. They can be found in oceans all over the world, throughout Europe and Asia in waters of varying salinity and temperature. They have a lobed body and four rows of celia. The following is an RNA-seq analysis of two different samples the aboral and oral. There are four replicates of each sample type. The differential gene expression between the samples are analyzed.
+
+1\) Build hierarchical trees based on the columns and for the rows (exclude rows with low expression)
+
+```{r}
+#load libraries
+library(ggplot2)
+library(dplyr)
+library(DESeq2)
+library(RColorBrewer)
+```
+
+```{r}
+#load data count and col
+m_count <- read.table("Mnemiopsis_count_data.csv", header = TRUE, row.names=1, sep=",")
+m_coldata <- read.table("Mnemiopsis_col_data.csv", header =TRUE, row.names=1, sep=",")
+head(m_count)
+#head(m_coldata)
+```
+
+```{r}
+#Subset of data to remove low expressors genes; arbitrarily chose 50000
+m_count_subset <- as.matrix(m_count[rowSums(m_count)>50000,])
+#Use PEarson correlation for hcluster
+m_dm <- as.dist((1-cor(t(m_count_subset), method= c("pearson")))/2)
+hclust_m <- hclust(m_dm, method="complete")
+library(dendextend)
+```
+
+```{r}
+#Creating the dendrogram
+par(mar= c(5,5,5,12))
+nPar <- list(lab.cex=0.6,pch=c(NA,19), cex=0.7)
+ePar <- list(col= 2:3, lwd = 2:1)
+plot(as.dendrogram(hclust_m), nodePar = nPar, edgePar=ePar, horiz=TRUE)
+```
+
+```{r}
+#Correlation by column or sample using Pearson correlation
+m_dmt <- as.dist((1-cor(m_count_subset, method= c("pearson")))/2)
+hclust_m_dmt <- hclust(m_dmt, method = "complete")
+par(mar= c(5,5,5,12))
+nPar <- list(lab.cex=0.6,pch=c(NA,19), cex=0.7)
+ePar <- list(col= 2:3, lwd = 2:1)
+plot(as.dendrogram(hclust_m_dmt), nodePar = nPar, edgePar=ePar, horiz=TRUE)
+
+```
+
+The hierarchical clusters of the genes reveal certain clustering genes which may indicate a separation of the two types of samples. The clustering of the columns or samples do show a clustering between the samples. Aboral and oral samples separate into two main clusters and further divide to the individual samples. In the case of aboral group, aboral1 is distinguished from others. And, in the case of oral group, oral 1 and 2 are close and oral 3 and 4 are close to each other.
+
+2\) Draw a heat map of the expression data
+
+```{r}
+library(reshape2)
+library(plyr)
+library(scales)
+#library(pheatmap)
+heatmap(m_count_subset)
+```
+
+Interestingly, the heatmap is different from the second hierarchical tree. In the second hierarchical tree, aboral1 has distance prominently from others, but, in the heatmap above, oral1 stands out as a possible outlier. It shows higher expression of some genes not seen in the other oral samples.
+
+3\) Use Deseq2 to analyze data.
+
+```{r}
+#Match column names of count data to row names of coldata
+rownames(m_coldata) <- c("aboral1", "aboral2", "aboral3", "aboral4", "oral1", "oral2", "oral3", "oral4")
+#head(m_coldata)
+all(colnames(m_count_subset)==rownames(m_coldata))
+```
+
+```{r}
+#creating the Deseg2 object
+dds <- DESeqDataSetFromMatrix(countData= m_count, colData=m_coldata, design = ~condition)
+dds <- DESeq(dds)
+```
+
+```{r}
+dds
+```
+
+```{r}
+# filtering data to remove low expressors
+dds <- dds[rowSums(counts(dds))>=10,]
+dds
+```
+
+#### MA Plot to Visualize Results
+
+```{r}
+res<-results(dds)
+#res
+plotMA(res)
+```
+
+The MA plot above shows the genes that are up-regulated (positive values over zero) and down-regulated (the negative values over zero).
+
+```{r}
+#plot pca to get idea about the clustering of the data
+vsdata <- vst(dds, blind = FALSE)
+plotPCA(vsdata, intgroup= "condition")
+```
+
+The PCA plot of the data is shown above. PC1 which accounts for 66% of the variability. PC1 accounts for the separation between the aboral and oral samples. PC2 which accounts for 22% of the data accounts for the separation within the each sub group. What is unusual is that PC2 also account for separation between three of the oral samples and one of the oral samples. It could account for the possible outlier seen in the heatmap.
+
+```{r}
+#Plot of the dispersion of the data
+plotDispEsts(dds)
+```
+
+The dispersion plot is shown above. There are many genes that are not fitted to the line.
+
+```{r}
+#filter the data to include only significant (<0.05) padj values
+res_sig <- na.omit(res)
+res_sig <- res_sig[res_sig$padj < 0.05,]
+head(res_sig)
+```
+
+```{r}
+#filter data to include only significantly differentially expressed genes
+res_sig_df <- data.frame(res_sig)
+res_sig_df <- res_sig_df[(res_sig_df$baseMean >100) & (abs(res_sig_df$log2FoldChange)>2),]
+
+```
+
+a\) Which are the most significantly changing genes in this dataset?
+
+The heatmap below shows the differentially expressed genes between the two samples aboral (1-4) and oral (5-8).
+
+```{r}
+#heatmap of the differentially expressed genes between oral and aboral samples
+count_sig <- counts(dds, normalized = T)[rownames(res_sig_df),]
+zscore_sig <- t(apply(count_sig,1,scale))
+heatmap(zscore_sig)
+```
+
+b\) Which genes are the most consistently highly expressed? They are the housekeeping genes.
+
+After filtering the data, below are the top ten genes with the highest baseMean. I use baseMean as an indicator of high expression.
+
+```{r}
+#Getting the top 10 highly expressed genes
+res_sig_des <- res_sig_df %>% arrange(desc(baseMean))
+res_sig_des[1:10,]
+```
+
+c\) How consistent are these results with the analysis you did in the midterm?
+
+Based on the midterm, the high expressing genes were: ML46651a, ML01482a, ML034334a, ML034336a, and ML034337a. The results from the midterm and the results shown above share 3 genes in common:
+
+ML034334a
+
+ML034336a
+
+ML034337a
+
+When each sample was analyze in the midterm, the genes ML46651a and ML01482a also came up in several of the samples. The results achieved here are consistent with the results achieved in the midterm.
+
+d\) What else can you say about the data in terms of consistency and the results that you find from your analysis.
+
+The results of the final and the midterm of highly expressed genes are consistent and indicates the importance of these genes for survival of the Mnemiopsis Leidyi. ML034334a, ML034336a, and ML034337a are involved in formation of extra-cellular matrix.
+
+e\) What is the most interesting pathway or gene that is responding in this study?
+
+The genes of highest expression are related to essential functions of the Mnemiopsis Leidyi. Gene ML46651a is involved in membrane attach complex, which form pores leading cell lysis or ion and water flow. Gene ML01482a is involved in micro-tubule and cyto-skeleton formation essential for movement and structure.
